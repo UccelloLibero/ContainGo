@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -49,40 +50,44 @@ var RunCmd = &cobra.Command{
 
 // runContainer runs a process inside an isolated root filesystem
 func runContainer(rootfs, command string, commandArgs []string) {
-	fmt.Println("🔹 Running container with root filesystem:", rootfs)
+	fmt.Println("Running container with root filesystem:", rootfs)
 
 	containerID := generateID()
 
 	// Fork and run the container process
 	cmd := exec.Command(command, commandArgs...)
 
-	// No namespaces, just execute inside chroot
-	fmt.Println("⚠️ No namespace isolation (macOS & Linux-compatible)")
+	// Skip namespace isolation (not supported on macOS/Windows)
+	fmt.Println("No namespace isolation (macOS & Linux-compatible)")
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Change root filesystem
-	if err := unix.Chroot(rootfs); err != nil {
-		fmt.Println("❌ Error in chroot:", err)
-		return
-	}
-	if err := os.Chdir("/"); err != nil {
-		fmt.Println("❌ Error changing directory:", err)
-		return
-	}
+	// Perform chroot (only for Linux/macOS)
+	if runtime.GOOS != "windows" {
+		if err := syscall.Chroot(rootfs); err != nil {
+			fmt.Println("Error in chroot:", err)
+			return
+		}
+		if err := os.Chdir("/"); err != nil {
+			fmt.Println("Error changing directory:", err)
+			return
+		}
 
-	// Setup filesystem only on Linux
-	if runtime.GOOS == "linux" {
-		setupFilesystem()
+		// Setup filesystem only on Linux
+		if runtime.GOOS == "linux" {
+			setupFilesystem()
+		} else {
+			fmt.Println("Skipping filesystem setup. macOS does not support /proc mounting.")
+		}
 	} else {
-		fmt.Println("⚠️ Skipping filesystem setup. macOS does not support /proc mounting.")
+		fmt.Println("Skipping chroot: Windows does not support this operation.")
 	}
 
 	// Run the container process
 	if err := cmd.Start(); err != nil {
-		fmt.Println("❌ Error starting container:", err)
+		fmt.Println("Error starting container:", err)
 		return
 	}
 
@@ -92,7 +97,7 @@ func runContainer(rootfs, command string, commandArgs []string) {
 
 	// Wait for the process to finish
 	if err := cmd.Wait(); err != nil {
-		fmt.Println("❌ Container process exited with error:", err)
+		fmt.Println("Container process exited with error:", err)
 	}
 }
 
@@ -101,11 +106,11 @@ func setupFilesystem() {
 	if runtime.GOOS != "linux" {
 		return
 	}
-	fmt.Println("🔹 Setting up filesystem inside container...")
+	fmt.Println("Setting up filesystem inside container...")
 
 	// Mount /proc
 	if err := unix.Mount("proc", "/proc", 0, unsafe.Pointer(nil)); err != nil {
-		fmt.Println("❌ Error mounting /proc:", err)
+		fmt.Println("Error mounting /proc:", err)
 	}
 }
 
@@ -117,14 +122,14 @@ func saveContainerMetadata(container Container) {
 	if _, err := os.Stat("metadata.json"); err == nil {
 		file, err := os.Open("metadata.json")
 		if err != nil {
-			fmt.Println("❌ Error opening metadata file:", err)
+			fmt.Println("Error opening metadata file:", err)
 			return
 		}
 		defer file.Close()
 
 		decoder := json.NewDecoder(file)
 		if err := decoder.Decode(&containers); err != nil {
-			fmt.Println("❌ Error decoding existing metadata:", err)
+			fmt.Println("Error decoding existing metadata:", err)
 			return
 		}
 	}
@@ -135,13 +140,13 @@ func saveContainerMetadata(container Container) {
 	// Write updated metadata back to file
 	file, err := os.Create("metadata.json")
 	if err != nil {
-		fmt.Println("❌ Error creating metadata file:", err)
+		fmt.Println("Error creating metadata file:", err)
 		return
 	}
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(containers); err != nil {
-		fmt.Println("❌ Error encoding metadata:", err)
+		fmt.Println("Error encoding metadata:", err)
 	}
 }
