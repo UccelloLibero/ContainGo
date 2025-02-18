@@ -1,0 +1,53 @@
+name: Build & Release ContainGo
+
+on:
+  push:
+    tags:
+      - "v*"  # Runs only when pushing a version tag like v1.0.0
+
+jobs:
+  build:
+    name: Build & Release Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"  
+
+      - name: Build Binary
+        run: |
+          mkdir -p build
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o build/containgo-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Upload Binary as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: containgo-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: build/containgo-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/containgo-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
