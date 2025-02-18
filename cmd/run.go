@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"syscall"
+	"runtime"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/spf13/cobra"
-	"github.com/vishvananda/netlink"
 )
 
 // Container struct to store metadata
@@ -28,10 +29,9 @@ func generateID() string {
 // RunCmd represents the run command
 var RunCmd = &cobra.Command{
 	Use:   "run [rootfs] [command] [args...]",
-	Short: "Run a container with the specified root filesystem and command",
-	Long: `Runs a new container with an isolated root filesystem, 
-           process ID namespace, and networking. Supports executing specific commands.`,
-	Args: cobra.MinimumNArgs(1),
+	Short: "Run a process inside an isolated root filesystem",
+	Long:  "Runs a command inside a new root filesystem using chroot. Works on macOS and Linux.",
+	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		rootfs := args[0]
 
@@ -47,108 +47,84 @@ var RunCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	RootCmd.AddCommand(RunCmd)
-}
-
-// runContainer executes an isolated container environment
+// runContainer runs a process inside an isolated root filesystem
 func runContainer(rootfs, command string, commandArgs []string) {
-	fmt.Println("Running container with root filesystem:", rootfs)
+	fmt.Println("🔹 Running container with root filesystem:", rootfs)
 
 	containerID := generateID()
 
-	// Command to run inside the container
+	// Fork and run the container process
 	cmd := exec.Command(command, commandArgs...)
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWNS |
-			syscall.CLONE_NEWPID |
-			syscall.CLONE_NEWUTS |
-			syscall.CLONE_NEWNET,
-	}
+	// No namespaces, just execute inside chroot
+	fmt.Println("⚠️ No namespace isolation (macOS & Linux-compatible)")
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Setup filesystem before chroot
-	setupFilesystem()
-
-	// Change root to the new filesystem
-	if err := syscall.Chroot(rootfs); err != nil {
-		fmt.Println("Error in chroot:", err)
+	// Change root filesystem
+	if err := unix.Chroot(rootfs); err != nil {
+		fmt.Println("❌ Error in chroot:", err)
 		return
 	}
 	if err := os.Chdir("/"); err != nil {
-		fmt.Println("Error changing directory:", err)
+		fmt.Println("❌ Error changing directory:", err)
 		return
 	}
 
-	// Setup cgroups
-	setupCgroups(containerID)
-
-	// Setup networking
-	setupNetworking(containerID)
+	// Setup filesystem only on Linux
+	if runtime.GOOS == "linux" {
+		setupFilesystem()
+	} else {
+		fmt.Println("⚠️ Skipping filesystem setup. macOS does not support /proc mounting.")
+	}
 
 	// Run the container process
 	if err := cmd.Start(); err != nil {
-		fmt.Println("Error starting container:", err)
+		fmt.Println("❌ Error starting container:", err)
 		return
 	}
 
-	// Store metadata after successful start
+	// Store metadata
 	container := Container{ID: containerID, PID: cmd.Process.Pid, Rootfs: rootfs}
 	saveContainerMetadata(container)
 
 	// Wait for the process to finish
 	if err := cmd.Wait(); err != nil {
-		fmt.Println("Container process exited with error:", err)
+		fmt.Println("❌ Container process exited with error:", err)
 	}
 }
 
-// setupFilesystem mounts /proc and /dev for the container
+// setupFilesystem mounts /proc (only on Linux)
 func setupFilesystem() {
-	fmt.Println("Setting up filesystem inside container...")
-	syscall.Mount("proc", "/proc", "proc", 0, "")
-	os.MkdirAll("/dev", 0755)
-	syscall.Mount("tmpfs", "/dev", "tmpfs", 0, "")
-}
-
-// setupCgroups configures resource limits for the container
-func setupCgroups(containerID string) {
-	cgroupPath := filepath.Join("/sys/fs/cgroup/memory", "containGo-"+containerID)
-	os.Mkdir(cgroupPath, 0755)
-	os.WriteFile(filepath.Join(cgroupPath, "memory.limit_in_bytes"), []byte("268435456"), 0700)
-}
-
-// setupNetworking creates a virtual Ethernet pair for networking
-func setupNetworking(containerID string) error {
-	hostVeth := fmt.Sprintf("veth%s", containerID[:5])
-	contVeth := "eth0"
-
-	link := &netlink.Veth{
-		LinkAttrs: netlink.LinkAttrs{Name: hostVeth},
-		PeerName:  contVeth,
+	if runtime.GOOS != "linux" {
+		return
 	}
-	return netlink.LinkAdd(link)
+	fmt.Println("🔹 Setting up filesystem inside container...")
+
+	// Mount /proc
+	if err := unix.Mount("proc", "/proc", 0, unsafe.Pointer(nil)); err != nil {
+		fmt.Println("❌ Error mounting /proc:", err)
+	}
 }
 
-// saveContainerMetadata stores the container metadata to a JSON file
+// saveContainerMetadata stores the container metadata
 func saveContainerMetadata(container Container) {
 	var containers []Container
 
 	// Check if metadata file exists
-	if _, err := os.Stat(metadataFile); err == nil {
-		file, err := os.Open(metadataFile)
+	if _, err := os.Stat("metadata.json"); err == nil {
+		file, err := os.Open("metadata.json")
 		if err != nil {
-			fmt.Println("Error opening metadata file:", err)
+			fmt.Println("❌ Error opening metadata file:", err)
 			return
 		}
 		defer file.Close()
 
 		decoder := json.NewDecoder(file)
 		if err := decoder.Decode(&containers); err != nil {
-			fmt.Println("Error decoding existing metadata:", err)
+			fmt.Println("❌ Error decoding existing metadata:", err)
 			return
 		}
 	}
@@ -157,15 +133,15 @@ func saveContainerMetadata(container Container) {
 	containers = append(containers, container)
 
 	// Write updated metadata back to file
-	file, err := os.Create(metadataFile)
+	file, err := os.Create("metadata.json")
 	if err != nil {
-		fmt.Println("Error creating metadata file:", err)
+		fmt.Println("❌ Error creating metadata file:", err)
 		return
 	}
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(containers); err != nil {
-		fmt.Println("Error encoding metadata:", err)
+		fmt.Println("❌ Error encoding metadata:", err)
 	}
 }

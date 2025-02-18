@@ -1,9 +1,10 @@
 package main
 
 import (
-	"ContainGo/cmd"
 	"fmt"
 	"os"
+
+	"github.com/UccelloLibero/ContainGo/cmd"
 )
 
 func main() {

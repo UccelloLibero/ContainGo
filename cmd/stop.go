@@ -30,10 +30,6 @@ var StopCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	RootCmd.AddCommand(StopCmd)
-}
-
 func stopContainer(pid int) {
 	fmt.Printf("Stopping container with PID: %d\n", pid)
 
