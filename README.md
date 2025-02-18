@@ -16,7 +16,7 @@ It is designed for Linux and macOS but lacks full namespace support on macOS.
 ---
 
 ## **About this project**
-This project is a part of my learning journey to understand containerization, Linux namespaces, cgroups, and process isolation. It is not a full-fleged container runtime like Docker, but rather a hands-on experiment to learn how containers work internally. 
+This project is a part of my learning journey to understand containerization, Linux namespaces, cgroups, and process isolation. It is not a full-fledged container runtime like Docker, but rather a hands-on experiment to learn how containers work internally. 
 
 ---
 
@@ -28,7 +28,7 @@ git clone https://github.com/UccelloLibero/ContainGo.git
 cd ContainGo
 ```
 
-### **Install dependencies
+### **Install dependencies**
 Run:
 ```sh
 go mod tidy
@@ -75,9 +75,9 @@ Use "contain-go [command] --help" for more information about a command.
 Since ContainGo uses `chroot`, it needs a minimal root filesystem:
 ```sh
 mkdir -p test_rootfs/bin
-cp /bin/sh test_rootfs/bin/ # Copy a shell into the test filesystem
+cp /bin/sh test_rootfs/bin/  # Copy a shell into the test filesystem
 ```
-Now `test_rootfs`
+Now `test_rootfs`is ready.
 
 ---
 
@@ -98,7 +98,7 @@ exit
 ## **Run a container in the background**
 Run:
 ```sh
-./containgo run text_rootfs &
+./containgo run test_rootfs &
 ```
 The `&` runs it in the background.
 
@@ -117,7 +117,7 @@ Container ID | PID
 
 ---
 
-## **Stop a running container**
+## **Stopping a running container**
 Find the PID:
 ```sh
 ps aux | grep containgo
@@ -136,7 +136,7 @@ Expected: The container is killed.
 ---
 
 ## **Error handling**
-1. Stoping a non-existent process:
+1. Stopping a non-existent process:
 ```sh
 ./containgo stop 999999
 ```
